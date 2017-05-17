@@ -41,7 +41,6 @@ def splitPhones(phoneStress):
 
 randoSeed = 101
 seed(randoSeed)
-tf.set_random_seed(randoSeed)
 
 # Read in labeled poems
 lines, phones, labels = readPoems("linePhonesWithStress.txt")
