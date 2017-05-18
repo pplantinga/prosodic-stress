@@ -51,39 +51,50 @@ lines, phones, labels = zip(*Z)
 
 phones, lex = splitPhones(phones)
 
-model = ProsodicStressModel(lines, phones, lex, labels,
-        position = 4)
-
 # Training parameters
 lr = 0.002
 batch_size = 32
-last_acc = 0
 
-# Train for 50 epochs
-sess = tf.Session()
-sess.run(tf.global_variables_initializer())
-for epoch in range(50):
+avg_SER = 0
+avg_acc = 0
 
-    batches = model.batchify(batch_size, lr)
-    
-    for fd in batches:
-        sess.run(model.train_op, fd)
+# 10-fold CV
+for position in range(10):
 
-    predictions = model.predict(sess)
+    model = ProsodicStressModel(lines, phones, lex, labels,
+            position = position)
 
-    # Check out error rate and accuracy
-    SER = errorRate(model.test['labels'], predictions)
-    acc = line_accuracy(model.test['labels'], predictions)
+    last_acc = 0
 
-    if (epoch + 1) % 10 == 0:
-        print("Epoch: " + str(epoch))
-        print("SER = " + str(SER))
-        print("acc = " + str(acc*100))
+    # Train for 50 epochs
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+    for epoch in range(50):
 
-    # Reduce learning rate by 30% whenever accuracy decreases
-    if acc < last_acc:
-        lr *= 0.7
-    
-    last_acc = acc
+        batches = model.batchify(batch_size, lr)
 
+        for fd in batches:
+            sess.run(model.train_op, fd)
 
+        predictions = model.predict(sess)
+
+        # Check out error rate and accuracy
+        SER = errorRate(model.test['labels'], predictions)
+        acc = line_accuracy(model.test['labels'], predictions)
+
+        if (epoch + 1) == 50:
+            print("Epoch: " + str(epoch))
+            print("SER = " + str(SER))
+            print("acc = " + str(acc*100))
+
+        # Reduce learning rate by 30% whenever accuracy decreases
+        if acc < last_acc:
+            lr *= 0.7
+
+        last_acc = acc
+
+    avg_SER += SER / 10
+    avg_acc += acc / 10
+
+print("Average SER: " + str(avg_SER))
+print("Average acc: " + str(avg_acc * 100))

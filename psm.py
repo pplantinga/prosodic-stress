@@ -23,6 +23,8 @@ class ProsodicStressModel:
             hidden_dropout = 0.4,
             output_dropout = 0.2):
 
+        self.position = position
+
         # Embedding params
         self.embed_size = embedding_size
         self.embed_dropout = embedding_dropout
@@ -180,18 +182,18 @@ class ProsodicStressModel:
 
         self._make_placeholders()
         
-        with tf.variable_scope("lex"):
+        with tf.variable_scope("lex" + str(self.position)):
             lex_rep = self._make_embedding(self.lex, len(self.lex_indices))
 
-        with tf.variable_scope("graph"):
+        with tf.variable_scope("graph" + str(self.position)):
             graph_rep = self._make_embedding(self.graphs, len(self.graph_indices))
             graph_rep = self._make_recurrent_embedding(graph_rep, self.graph_lengths)
         
-        with tf.variable_scope("phone"):
+        with tf.variable_scope("phone" + str(self.position)):
             phone_rep = self._make_embedding(self.phones, len(self.phone_indices))
             phone_rep = self._make_recurrent_embedding(phone_rep, self.phone_lengths)
 
-        with tf.variable_scope("lines"):
+        with tf.variable_scope("lines" + str(self.position)):
             lines_rep = self._make_embedding(self.lines, len(self.syl_indices))
         
         # Concatenate all representations to a single feature vector
@@ -199,16 +201,17 @@ class ProsodicStressModel:
         #features = tf.concat([graph_rep, lines_rep], -1)
         #features = self.lines
 
-        with tf.variable_scope("hidden"):
+        with tf.variable_scope("hidden" + str(self.position)):
             hidden_output = self._make_hidden(features)
 
         # output will be used for predictions
-        with tf.variable_scope("output"):
+        with tf.variable_scope("output" + str(self.position)):
             #x = tf.reshape(features, [-1, len(self.syl_indices)])
             #self.output = self._make_output(x)
             self.output = self._make_output(hidden_output)
             
-        self._make_train_op()
+        with tf.variable_scope("train_op" + str(self.position)):
+            self._make_train_op()
 
 
     # This will hold the data at compute time
@@ -325,11 +328,9 @@ class ProsodicStressModel:
             tf.contrib.crf.crf_log_likelihood(self.output, self.labels, self.line_lengths)
         loss = tf.reduce_mean(-log_likelihood)
 
-        # Adam optimization with gradient clipping
+        # Adam optimization
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
-        gvs = optimizer.compute_gradients(loss)
-        capped_gvs = [(tf.clip_by_norm(grad, 5.), var) for grad, var in gvs]
-        self.train_op = optimizer.apply_gradients(capped_gvs)
+        self.train_op = optimizer.minimize(loss)
 
     # Create a list of feed dictionaries, one per batch
     def batchify(self, batch_size, lr):
