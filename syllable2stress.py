@@ -1,8 +1,9 @@
 
 from psm import ProsodicStressModel
 import tensorflow as tf
-from g2p.helpers import trainTestSplit, errorRate, line_accuracy
+from g2p.helpers import trainTestSplit, errorRate, line_accuracy, trainTestSplit
 from random import seed, shuffle
+from re import sub
 
 def readPoems(filename):
     lines = []
@@ -35,21 +36,42 @@ def splitPhones(phoneStress):
 
     return phones, lex
 
+# Split a line into syllables. _if clean is true, remove punctuation and caps
+def split_line(line, clean=True):
+    
+    if clean:
+        line = sub("[^a-z ']", ' ', line.lower())
+
+    else:
+        line = line.replace('"', '')
+        line = line.replace(",", ", ")
+        line = sub("(\s*-\s*)+", " -", line)
+        line = sub("\s*-$", "", line)
+
+    return line.split()
+
+
 ########
 # Main #
 ########
 
-randoSeed = 101
+randoSeed = 131009
 seed(randoSeed)
 
 # Read in labeled poems
 lines, phones, labels = readPoems("linePhonesWithStress.txt")
 
+# Shuffle data randomly
 Z = list(zip(lines, phones, labels))
 shuffle(Z)
 lines, phones, labels = zip(*Z)
 
+# Split pronunciations into phones and lexical stress
 phones, lex = splitPhones(phones)
+
+# Generate graphs and lines from the text
+graphs = [split_line(i, clean=False) for i in lines]
+lines = [split_line(i, clean=True) for i in lines]
 
 # Training parameters
 lr = 0.002
@@ -58,16 +80,29 @@ batch_size = 32
 avg_SER = 0
 avg_acc = 0
 
-# 10-fold CV
-for position in range(10):
+model = ProsodicStressModel()#hidden_is_recurrent=False)
 
-    model = ProsodicStressModel(lines, phones, lex, labels,
-            position = position)
+# 10-fold CV
+folds = 10
+for position in range(folds):
+
+    train = {}
+    test = {}
+    train['phones'], test['phones'] = trainTestSplit(phones, 1/folds, position)
+    train['graphs'], test['graphs'] = trainTestSplit(graphs, 1/folds, position)
+    train['lines'],  test['lines']  = trainTestSplit(lines, 1/folds, position)
+    train['labels'], test['labels'] = trainTestSplit(labels, 1/folds, position)
+    train['lex'],    test['lex']    = trainTestSplit(lex, 1/folds, position)
+    model.make_inputs(train, test)
+
+    # On first iteration, initialize graph and start session
+    if position == 0:
+        model.make_graph()
+        sess = tf.Session()
 
     last_acc = 0
 
     # Train for 50 epochs
-    sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     for epoch in range(50):
 
