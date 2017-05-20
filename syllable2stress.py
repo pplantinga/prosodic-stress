@@ -55,7 +55,7 @@ def split_line(line, clean=True):
 # Main #
 ########
 
-randoSeed = 131009
+randoSeed = 11009
 seed(randoSeed)
 
 # Read in labeled poems
@@ -81,9 +81,12 @@ avg_SER = 0
 avg_acc = 0
 
 model = ProsodicStressModel()#hidden_is_recurrent=False)
+model.compute_size(lines, lex, graphs, phones, labels)
+model.make_graph()
 
 # 10-fold CV
 folds = 10
+sess = tf.Session()
 for position in range(folds):
 
     train = {}
@@ -94,11 +97,6 @@ for position in range(folds):
     train['labels'], test['labels'] = trainTestSplit(labels, 1/folds, position)
     train['lex'],    test['lex']    = trainTestSplit(lex, 1/folds, position)
     model.make_inputs(train, test)
-
-    # On first iteration, initialize graph and start session
-    if position == 0:
-        model.make_graph()
-        sess = tf.Session()
 
     last_acc = 0
 
@@ -118,7 +116,6 @@ for position in range(folds):
         acc = line_accuracy(model.test['labels'], predictions)
 
         if (epoch + 1) == 50:
-            print("Epoch: " + str(epoch))
             print("SER = " + str(SER))
             print("acc = " + str(acc*100))
 
