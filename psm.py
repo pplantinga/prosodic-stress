@@ -51,7 +51,7 @@ class ProsodicStressModel:
         lex_indices,   _ = self._vocab(lex)
         graph_indices, _ = self._vocab(graphs)
         phone_indices, _ = self._vocab(phones)
-        label_indices, _ = self._vocab(labels[0])
+        label_indices, _ = self._vocab([label[0] for label in labels])
 
         # Compute vocab sizes
         self.syl_vocab_size = len(syl_indices)
@@ -142,8 +142,8 @@ class ProsodicStressModel:
 
         return vocab_indices, indices_vocab
 
-    def _convert2onehot(self, data, length, indices):
-        index = np.zeros([len(data), length, len(indices)], dtype=np.float32)
+    def _convert2onehot(self, data, length, width, indices):
+        index = np.zeros([len(data), length, width], dtype=np.float32)
 
         for i, line in enumerate(data):
             for j, token in enumerate(line):
@@ -191,14 +191,14 @@ class ProsodicStressModel:
         # Concatenate all representations to a single feature vector
         features = tf.concat([graph_rep, lex_rep, phone_rep, lines_rep], -1)
         #features = tf.concat([graph_rep, lines_rep], -1)
-        #features = self.lines
+        #features = lines_rep#self.lines
 
         with tf.variable_scope("hidden"):
             hidden_output = self._make_hidden(features)
 
         # output will be used for predictions
         with tf.variable_scope("output"):
-            #x = tf.reshape(features, [-1, self.syl_vocab_size])
+            #x = tf.reshape(features, [-1, self.embed_size])#self.syl_vocab_size])
             #self.output = self._make_output(x)
             self.output = self._make_output(hidden_output)
             
@@ -211,7 +211,7 @@ class ProsodicStressModel:
         
         # Data inputs
         self.lines  = tf.placeholder(tf.int32, [None, self.max_line_len], name="lines")
-        #self.lines  = tf.placeholder(tf.float32, [None, self.max_line_len, self.syl_vocab_size, name="lines")
+        #self.lines  = tf.placeholder(tf.float32, [None, self.max_line_len, self.syl_vocab_size], name="lines")
         self.lex    = tf.placeholder(tf.int32, [None, self.max_line_len], name="lex")
         self.graphs = tf.placeholder(tf.int32, [None, self.max_graph_len], name="graphs")
         self.phones = tf.placeholder(tf.int32, [None, self.max_phone_len], name="phones")
