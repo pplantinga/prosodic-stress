@@ -60,62 +60,62 @@ class ProsodicStressModel:
         self.phone_vocab_size = len(phone_indices)
         self.label_vocab_size = len(label_indices)
 
-    # Change the data into numeric form for computation
-    def _make_3D_input(self, data, max_len, indices):
 
-        # Convert to indexes
-        lengths = np.array([len(line) for line in data])
-        data = self._convert2index(data, max_len, indices)
-
-        # Convert back to 3-d
-        data = np.reshape(data, [-1, self.max_line_len, max_len])
-        lengths = np.reshape(lengths, [-1, self.max_line_len])
-
-        return data, lengths
-
-    # Organize the inputs into matrix form
+    # Organize the data into one-hot vectors
     def make_inputs(self, train, test):
 
-        self.train = {}
-        self.test = {}
+        self.train = train
+        self.test = test
 
+        # Calculate lengths
+        self.train['lengths'] = np.array([len(line) for line in self.train['lines']])
+        self.test['lengths'] = [len(line) for line in self.test['lines']]
+        
         # Only use the first label for each training example.
-        train['labels'] = [labels[0] for labels in train['labels']]
+        self.train['labels'] = [labels[0] for labels in self.train['labels']]
 
-        # Pad 3-d data and convert to 2-d
-        train['graphs'] = self._pad(train['graphs'], self.max_line_len)
-        test['graphs']  = self._pad(test['graphs'], self.max_line_len)
-        train['phones'] = self._pad(train['phones'], self.max_line_len)
-        test['phones']  = self._pad(test['phones'], self.max_line_len)
+        # pad each line to max_line_len and reshape to 1-d
+        self.train['graphs'] = self._pad(self.train['graphs'], self.max_line_len)
+        self.test['graphs']  = self._pad(self.test['graphs'], self.max_line_len)
+        self.train['phones'] = self._pad(self.train['phones'], self.max_line_len)
+        self.test['phones']  = self._pad(self.test['phones'], self.max_line_len)
+
+        # Calculate lengths
+        self.train['graph_lengths'] = [len(graph) for graph in self.train['graphs']]
+        self.test['graph_lengths']  = [len(graph) for graph in self.test['graphs']]
+
+        self.train['phone_lengths'] = [len(phone) for phone in self.train['phones']]
+        self.test['phone_lengths']  = [len(phone) for phone in self.test['phones']]
 
         # Create vocabulary for each input
-        self.syl_indices,   self.indices_syl   = self._vocab(train['lines'])
-        self.lex_indices,   self.indices_lex   = self._vocab(train['lex'])
-        self.graph_indices, self.indices_graph = self._vocab(train['graphs'])
-        self.phone_indices, self.indices_phone = self._vocab(train['phones'])
-        self.label_indices, self.indices_label = self._vocab(train['labels'])
+        self.syl_indices,   self.indices_syl   = self._vocab(self.train['lines'])
+        self.lex_indices,   self.indices_lex   = self._vocab(self.train['lex'])
+        self.graph_indices, self.indices_graph = self._vocab(self.train['graphs'])
+        self.phone_indices, self.indices_phone = self._vocab(self.train['phones'])
+        self.label_indices, self.indices_label = self._vocab(self.train['labels'])
 
-        # Calculate line lengths
-        self.train['lengths'] = np.array([len(line) for line in train['lines']])
-        self.test['lengths']  = np.array([len(line) for line in test['lines']])
+        # Convert all inputs to integer indexes
+        self.train['lines']  = self._convert2index(self.train['lines'], self.max_line_len, self.syl_indices)
+        self.train['lex']    = self._convert2index(self.train['lex'], self.max_line_len, self.lex_indices)
+        self.train['graphs'] = self._convert2index(self.train['graphs'], self.max_graph_len, self.graph_indices)
+        self.train['phones'] = self._convert2index(self.train['phones'], self.max_phone_len, self.phone_indices)
+        self.test['lines']   = self._convert2index(self.test['lines'], self.max_line_len, self.syl_indices)
+        self.test['lex']     = self._convert2index(self.test['lex'], self.max_line_len, self.lex_indices)
+        self.test['graphs']  = self._convert2index(self.test['graphs'], self.max_graph_len, self.graph_indices)
+        self.test['phones']  = self._convert2index(self.test['phones'], self.max_phone_len, self.phone_indices)
 
-        # Convert 2-d inputs to matrix form
-        self.train['lines']  = self._convert2index(train['lines'], self.max_line_len, self.syl_indices)
-        self.test['lines']   = self._convert2index(test['lines'], self.max_line_len, self.syl_indices)
-        self.train['lex']    = self._convert2index(train['lex'], self.max_line_len, self.lex_indices)
-        self.test['lex']     = self._convert2index(test['lex'], self.max_line_len, self.lex_indices)
-        self.train['labels'] = self._convert2index(train['labels'], self.max_line_len, self.label_indices)
-        self.test['labels']  = test['labels']
+        # Reshape back to 1 entry per line
+        self.train['graphs'] = np.reshape(self.train['graphs'], [-1, self.max_line_len, self.max_graph_len])
+        self.train['phones'] = np.reshape(self.train['phones'], [-1, self.max_line_len, self.max_phone_len])
+        self.test['graphs'] = np.reshape(self.test['graphs'], [-1, self.max_line_len, self.max_graph_len])
+        self.test['phones'] = np.reshape(self.test['phones'], [-1, self.max_line_len, self.max_phone_len])
+        self.train['graph_lengths'] = np.reshape(self.train['graph_lengths'], [-1, self.max_line_len])
+        self.train['phone_lengths'] = np.reshape(self.train['phone_lengths'], [-1, self.max_line_len])
+        self.test['graph_lengths'] = np.reshape(self.test['graph_lengths'], [-1, self.max_line_len])
+        self.test['phone_lengths'] = np.reshape(self.test['phone_lengths'], [-1, self.max_line_len])
 
-        # Convert 3-d inputs to matrix form
-        self.train['graphs'], self.train['graph_lengths'] = \
-                self._make_3D_input(train['graphs'], self.max_graph_len, self.graph_indices)
-        self.test['graphs'], self.test['graph_lengths'] = \
-                self._make_3D_input(test['graphs'], self.max_graph_len, self.graph_indices)
-        self.train['phones'], self.train['phone_lengths'] = \
-                self._make_3D_input(train['phones'], self.max_phone_len, self.phone_indices)
-        self.test['phones'], self.test['phone_lengths'] = \
-                self._make_3D_input(test['phones'], self.max_phone_len, self.phone_indices)
+        # Convert labels to indices
+        self.train['labels'] = self._convert2index(self.train['labels'], self.max_line_len, self.label_indices)
 
     # _pad each line to length and reshape to 1-d
     def _pad(self, data, length):
