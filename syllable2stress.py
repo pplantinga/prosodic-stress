@@ -1,9 +1,8 @@
 
 from psm import ProsodicStressModel
 import tensorflow as tf
-from g2p.helpers import trainTestSplit, errorRate, line_accuracy, trainTestSplit
+from g2p.helpers import trainTestSplit, errorRate, line_accuracy
 from random import seed, shuffle
-from re import sub
 
 def readPoems(filename):
     lines = []
@@ -36,42 +35,21 @@ def splitPhones(phoneStress):
 
     return phones, lex
 
-# Split a line into syllables. _if clean is true, remove punctuation and caps
-def split_line(line, clean=True):
-    
-    if clean:
-        line = sub("[^a-z ']", ' ', line.lower())
-
-    else:
-        line = line.replace('"', '')
-        line = line.replace(",", ", ")
-        line = sub("(\s*-\s*)+", " -", line)
-        line = sub("\s*-$", "", line)
-
-    return line.split()
-
-
 ########
 # Main #
 ########
 
-randoSeed = 11009
+randoSeed = 101
 seed(randoSeed)
 
 # Read in labeled poems
 lines, phones, labels = readPoems("linePhonesWithStress.txt")
 
-# Shuffle data randomly
 Z = list(zip(lines, phones, labels))
 shuffle(Z)
 lines, phones, labels = zip(*Z)
 
-# Split pronunciations into phones and lexical stress
 phones, lex = splitPhones(phones)
-
-# Generate graphs and lines from the text
-graphs = [split_line(i, clean=False) for i in lines]
-lines = [split_line(i, clean=True) for i in lines]
 
 # Training parameters
 lr = 0.002
@@ -80,27 +58,16 @@ batch_size = 32
 avg_SER = 0
 avg_acc = 0
 
-model = ProsodicStressModel()#hidden_is_recurrent=False)
-model.compute_size(lines, lex, graphs, phones, labels)
-model.make_graph()
-
 # 10-fold CV
-folds = 10
-sess = tf.Session()
-for position in range(folds):
+for position in range(10):
 
-    train = {}
-    test = {}
-    train['phones'], test['phones'] = trainTestSplit(phones, 1/folds, position)
-    train['graphs'], test['graphs'] = trainTestSplit(graphs, 1/folds, position)
-    train['lines'],  test['lines']  = trainTestSplit(lines, 1/folds, position)
-    train['labels'], test['labels'] = trainTestSplit(labels, 1/folds, position)
-    train['lex'],    test['lex']    = trainTestSplit(lex, 1/folds, position)
-    model.make_inputs(train, test)
+    model = ProsodicStressModel(lines, phones, lex, labels,
+            position = position)
 
     last_acc = 0
 
     # Train for 50 epochs
+    sess = tf.Session()
     sess.run(tf.global_variables_initializer())
     for epoch in range(50):
 
@@ -116,6 +83,7 @@ for position in range(folds):
         acc = line_accuracy(model.test['labels'], predictions)
 
         if (epoch + 1) == 50:
+            print("Epoch: " + str(epoch))
             print("SER = " + str(SER))
             print("acc = " + str(acc*100))
 

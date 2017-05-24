@@ -1,4 +1,5 @@
 
+from g2p.helpers import trainTestSplit
 from re import sub
 import tensorflow as tf
 from tensorflow.contrib.rnn import LSTMCell as LSTM, DropoutWrapper as Dropout, MultiRNNCell as Multi
@@ -11,14 +12,18 @@ class ProsodicStressModel:
     train = {}
     test = {}
 
-    def __init__(self, 
-            embedding_size = 16,
+    def __init__(self, lines, phones, lex, labels,
+            position = 0,
+            test_fraction = 0.1,
+            embedding_size = 15,
             embedding_dropout = 0.4,
             hidden_is_recurrent = True,
             hidden_layer_size = 100,
             hidden_layers = 2,
             hidden_dropout = 0.4,
             output_dropout = 0.2):
+
+        self.position = position
 
         # Embedding params
         self.embed_size = embedding_size
@@ -33,47 +38,33 @@ class ProsodicStressModel:
         # Output layer params
         self.output_dropout = output_dropout
 
-
-    # Compute sizes needed to build the graph
-    def compute_size(self, lines, lex, phones, graphs, labels):
-
-        # Calculate max lengths
-        self.max_line_len = max(len(line) for line in lines)
-
-        graphs = self._pad(graphs, self.max_line_len)
-        phones = self._pad(phones, self.max_line_len)
-
-        self.max_graph_len = max(len(graph) for graph in graphs)
-        self.max_phone_len = max(len(phone) for phone in phones)
-
-        # Create a lookup table so we know how big to make matrices
-        syl_indices,   _ = self._vocab(lines)
-        lex_indices,   _ = self._vocab(lex)
-        graph_indices, _ = self._vocab(graphs)
-        phone_indices, _ = self._vocab(phones)
-        label_indices, _ = self._vocab([label[0] for label in labels])
-
-        # Compute vocab sizes
-        self.syl_vocab_size = len(syl_indices)
-        self.lex_vocab_size = len(lex_indices)
-        self.graph_vocab_size = len(graph_indices)
-        self.phone_vocab_size = len(phone_indices)
-        self.label_vocab_size = len(label_indices)
-
+        # _initialize stuffs
+        self._make_inputs(lines, phones, lex, labels, position, test_fraction)
+        self._make_graph()
 
     # Organize the data into one-hot vectors
-    def make_inputs(self, train, test):
+    def _make_inputs(self, lines, phones, lex, labels, position, test_fraction):
+        
+        graphs = [self._split_line(i, clean=False) for i in lines]
+        lines = [self._split_line(i, clean=True) for i in lines]
 
-        self.train = train
-        self.test = test
+        # separate lines and labels (per-line stuff)
+        self.train['lines'], self.test['lines'] = trainTestSplit(lines, test_fraction, position)
+        self.train['lex'], self.test['lex'] = trainTestSplit(lex, test_fraction, position)
+        self.train['labels'], self.test['labels'] = trainTestSplit(labels, test_fraction, position)
 
-        # Calculate lengths
+        # Calculate lengths (test length cannot be longer than longest train length)
         self.train['lengths'] = np.array([len(line) for line in self.train['lines']])
-        self.test['lengths'] = [len(line) for line in self.test['lines']]
+        self.max_line_len = max(self.train['lengths'])
+        self.test['lengths'] = [min(len(line), self.max_line_len) for line in self.test['lines']]
         
         # Only use the first label for each training example.
         self.train['labels'] = [labels[0] for labels in self.train['labels']]
 
+        # separate graphs and phones (per-syllable stuff)
+        self.train['graphs'], self.test['graphs'] = trainTestSplit(graphs, test_fraction, position)
+        self.train['phones'], self.test['phones'] = trainTestSplit(phones, test_fraction, position)
+        
         # pad each line to max_line_len and reshape to 1-d
         self.train['graphs'] = self._pad(self.train['graphs'], self.max_line_len)
         self.test['graphs']  = self._pad(self.test['graphs'], self.max_line_len)
@@ -82,12 +73,14 @@ class ProsodicStressModel:
 
         # Calculate lengths
         self.train['graph_lengths'] = [len(graph) for graph in self.train['graphs']]
-        self.test['graph_lengths']  = [len(graph) for graph in self.test['graphs']]
+        self.max_graph_len = max(self.train['graph_lengths'])
+        self.test['graph_lengths']  = [min(len(graph), self.max_graph_len) for graph in self.test['graphs']]
 
         self.train['phone_lengths'] = [len(phone) for phone in self.train['phones']]
-        self.test['phone_lengths']  = [len(phone) for phone in self.test['phones']]
+        self.max_phone_len = max(self.train['phone_lengths'])
+        self.test['phone_lengths']  = [min(len(phone), self.max_phone_len) for phone in self.test['phones']]
 
-        # Create vocabulary for each input
+        # Create a lookup table for converting from tokens to indexes, and vice-versa
         self.syl_indices,   self.indices_syl   = self._vocab(self.train['lines'])
         self.lex_indices,   self.indices_lex   = self._vocab(self.train['lex'])
         self.graph_indices, self.indices_graph = self._vocab(self.train['graphs'])
@@ -117,6 +110,21 @@ class ProsodicStressModel:
         # Convert labels to indices
         self.train['labels'] = self._convert2index(self.train['labels'], self.max_line_len, self.label_indices)
 
+    # Split a line into syllables. _if clean is true, remove punctuation and caps
+    def _split_line(self, line, clean=True):
+        
+        if clean:
+            line = sub("[^a-z ']", ' ', line.lower())
+
+        else:
+            line = line.replace('"', '')
+            line = line.replace(",", ", ")
+            line = sub("(\s*-\s*)+", " -", line)
+            line = sub("\s*-$", "", line)
+
+        return line.split()
+
+
     # _pad each line to length and reshape to 1-d
     def _pad(self, data, length):
         return [x[i] if i < len(x) else self.PAD for x in data for i in range(length)]
@@ -142,8 +150,8 @@ class ProsodicStressModel:
 
         return vocab_indices, indices_vocab
 
-    def _convert2onehot(self, data, length, width, indices):
-        index = np.zeros([len(data), length, width], dtype=np.float32)
+    def _convert2onehot(self, data, length, indices):
+        index = np.zeros([len(data), length, len(indices)], dtype=np.float32)
 
         for i, line in enumerate(data):
             for j, token in enumerate(line):
@@ -170,39 +178,39 @@ class ProsodicStressModel:
         return index
 
     # Create the computation graph
-    def make_graph(self):
+    def _make_graph(self):
 
         self._make_placeholders()
         
-        with tf.variable_scope("lex"):
-            lex_rep = self._make_embedding(self.lex, self.lex_vocab_size)
+        with tf.variable_scope("lex" + str(self.position)):
+            lex_rep = self._make_embedding(self.lex, len(self.lex_indices))
 
-        with tf.variable_scope("graph"):
-            graph_rep = self._make_embedding(self.graphs, self.graph_vocab_size)
+        with tf.variable_scope("graph" + str(self.position)):
+            graph_rep = self._make_embedding(self.graphs, len(self.graph_indices))
             graph_rep = self._make_recurrent_embedding(graph_rep, self.graph_lengths)
         
-        with tf.variable_scope("phone"):
-            phone_rep = self._make_embedding(self.phones, self.phone_vocab_size)
+        with tf.variable_scope("phone" + str(self.position)):
+            phone_rep = self._make_embedding(self.phones, len(self.phone_indices))
             phone_rep = self._make_recurrent_embedding(phone_rep, self.phone_lengths)
 
-        with tf.variable_scope("lines"):
-            lines_rep = self._make_embedding(self.lines, self.syl_vocab_size)
+        with tf.variable_scope("lines" + str(self.position)):
+            lines_rep = self._make_embedding(self.lines, len(self.syl_indices))
         
         # Concatenate all representations to a single feature vector
         features = tf.concat([graph_rep, lex_rep, phone_rep, lines_rep], -1)
         #features = tf.concat([graph_rep, lines_rep], -1)
-        #features = lines_rep#self.lines
+        #features = self.lines
 
-        with tf.variable_scope("hidden"):
+        with tf.variable_scope("hidden" + str(self.position)):
             hidden_output = self._make_hidden(features)
 
         # output will be used for predictions
-        with tf.variable_scope("output"):
-            #x = tf.reshape(features, [-1, self.embed_size])#self.syl_vocab_size])
+        with tf.variable_scope("output" + str(self.position)):
+            #x = tf.reshape(features, [-1, len(self.syl_indices)])
             #self.output = self._make_output(x)
             self.output = self._make_output(hidden_output)
             
-        with tf.variable_scope("train_op"):
+        with tf.variable_scope("train_op" + str(self.position)):
             self._make_train_op()
 
 
@@ -211,7 +219,7 @@ class ProsodicStressModel:
         
         # Data inputs
         self.lines  = tf.placeholder(tf.int32, [None, self.max_line_len], name="lines")
-        #self.lines  = tf.placeholder(tf.float32, [None, self.max_line_len, self.syl_vocab_size], name="lines")
+        #self.lines  = tf.placeholder(tf.float32, [None, self.max_line_len, len(self.syl_indices)], name="lines")
         self.lex    = tf.placeholder(tf.int32, [None, self.max_line_len], name="lex")
         self.graphs = tf.placeholder(tf.int32, [None, self.max_graph_len], name="graphs")
         self.phones = tf.placeholder(tf.int32, [None, self.max_phone_len], name="phones")
@@ -242,8 +250,8 @@ class ProsodicStressModel:
 
     def _make_recurrent_embedding(self, inputs, input_lengths):
 
-        fw_rnn_cell = Dropout(LSTM(self.embed_size / 2), self.embed_keep_prob)
-        bw_rnn_cell = Dropout(LSTM(self.embed_size / 2), self.embed_keep_prob)
+        fw_rnn_cell = Dropout(LSTM(self.embed_size), self.embed_keep_prob)
+        bw_rnn_cell = Dropout(LSTM(self.embed_size), self.embed_keep_prob)
 
         _, ((_, out_fw), (_, out_bw)) = tf.nn.bidirectional_dynamic_rnn(
                 fw_rnn_cell,
@@ -253,16 +261,13 @@ class ProsodicStressModel:
                 dtype = tf.float32)
 
         output = tf.concat((out_fw, out_bw), -1)
-        return tf.reshape(output, [-1, self.max_line_len, self.embed_size])
-
-    def _hidden_cell(self):
-        return Dropout(LSTM(self.hidden_layer_size), self.hidden_keep_prob)
+        return tf.reshape(output, [-1, self.max_line_len, 2 * self.embed_size])
 
     def _make_hidden(self, features):
 
         if self.hidden_is_recurrent:
-            fw_rnn_cell = Multi([self._hidden_cell() for _ in range(self.hidden_layers)])
-            bw_rnn_cell = Multi([self._hidden_cell() for _ in range(self.hidden_layers)])
+            fw_rnn_cell = Multi([Dropout(LSTM(self.hidden_layer_size), self.hidden_keep_prob) for _ in range(self.hidden_layers)])
+            bw_rnn_cell = Multi([Dropout(LSTM(self.hidden_layer_size), self.hidden_keep_prob) for _ in range(self.hidden_layers)])
 
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                     fw_rnn_cell,
@@ -303,18 +308,18 @@ class ProsodicStressModel:
 
         W = tf.get_variable(
                 "W",
-                shape = [input_size, self.label_vocab_size],
+                shape = [input_size, len(self.label_indices)],
                 dtype = tf.float32,
                 initializer = tf.contrib.layers.xavier_initializer(uniform=False))
         b = tf.get_variable(
                 "b",
-                shape = [self.label_vocab_size],
+                shape = [len(self.label_indices)],
                 dtype = tf.float32,
                 initializer = tf.zeros_initializer())
 
         output = tf.nn.dropout(tf.matmul(hidden_output, W) + b, self.output_keep_prob)
         
-        return tf.reshape(output, [-1, self.max_line_len, self.label_vocab_size])
+        return tf.reshape(output, [-1, self.max_line_len, len(self.label_indices)])
 
     def _make_train_op(self):
 
