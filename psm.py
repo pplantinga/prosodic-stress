@@ -15,10 +15,10 @@ class ProsodicStressModel:
     def __init__(self, lines, phones, lex, labels,
             position = 0,
             test_fraction = 0.1,
-            embedding_size = 15,
+            embedding_size = 16,
             embedding_dropout = 0.4,
             hidden_is_recurrent = True,
-            hidden_layer_size = 100,
+            hidden_layer_size = 200,
             hidden_layers = 2,
             hidden_dropout = 0.4,
             output_dropout = 0.2):
@@ -250,8 +250,8 @@ class ProsodicStressModel:
 
     def _make_recurrent_embedding(self, inputs, input_lengths):
 
-        fw_rnn_cell = Dropout(LSTM(self.embed_size), self.embed_keep_prob)
-        bw_rnn_cell = Dropout(LSTM(self.embed_size), self.embed_keep_prob)
+        fw_rnn_cell = Dropout(LSTM(self.embed_size / 2), self.embed_keep_prob)
+        bw_rnn_cell = Dropout(LSTM(self.embed_size / 2), self.embed_keep_prob)
 
         _, ((_, out_fw), (_, out_bw)) = tf.nn.bidirectional_dynamic_rnn(
                 fw_rnn_cell,
@@ -261,13 +261,16 @@ class ProsodicStressModel:
                 dtype = tf.float32)
 
         output = tf.concat((out_fw, out_bw), -1)
-        return tf.reshape(output, [-1, self.max_line_len, 2 * self.embed_size])
+        return tf.reshape(output, [-1, self.max_line_len, self.embed_size])
+
+    def _hidden_cell(self):
+        return Dropout(LSTM(self.hidden_layer_size / 2), self.hidden_keep_prob)
 
     def _make_hidden(self, features):
 
         if self.hidden_is_recurrent:
-            fw_rnn_cell = Multi([Dropout(LSTM(self.hidden_layer_size), self.hidden_keep_prob) for _ in range(self.hidden_layers)])
-            bw_rnn_cell = Multi([Dropout(LSTM(self.hidden_layer_size), self.hidden_keep_prob) for _ in range(self.hidden_layers)])
+            fw_rnn_cell = Multi([self._hidden_cell() for _ in range(self.hidden_layers)])
+            bw_rnn_cell = Multi([self._hidden_cell() for _ in range(self.hidden_layers)])
 
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                     fw_rnn_cell,
@@ -278,7 +281,7 @@ class ProsodicStressModel:
 
             output = tf.concat(outputs, 2)
 
-            return tf.reshape(output, [-1, 2 * self.hidden_layer_size])
+            return tf.reshape(output, [-1, self.hidden_layer_size])
 
         else:
             input_size = features.get_shape().as_list()[-1]
